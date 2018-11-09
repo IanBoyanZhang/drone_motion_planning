@@ -1,7 +1,6 @@
 from enum import Enum
 from queue import PriorityQueue
 import numpy as np
-
 from sklearn.neighbors import KDTree
 
 
@@ -33,21 +32,21 @@ def create_grid(data, drone_altitude, safety_distance):
         north, east, alt, d_north, d_east, d_alt = data[i, :]
         if alt + d_alt + safety_distance > drone_altitude:
             obstacle = [
-                int(np.clip(north - d_north - safety_distance - north_min, 0, north_size-1)),
-                int(np.clip(north + d_north + safety_distance - north_min, 0, north_size-1)),
-                int(np.clip(east - d_east - safety_distance - east_min, 0, east_size-1)),
-                int(np.clip(east + d_east + safety_distance - east_min, 0, east_size-1)),
+                int(np.clip(north - d_north - safety_distance - north_min, 0, north_size - 1)),
+                int(np.clip(north + d_north + safety_distance - north_min, 0, north_size - 1)),
+                int(np.clip(east - d_east - safety_distance - east_min, 0, east_size - 1)),
+                int(np.clip(east + d_east + safety_distance - east_min, 0, east_size - 1)),
             ]
-            grid[obstacle[0]:obstacle[1]+1, obstacle[2]:obstacle[3]+1] = 1
+            grid[obstacle[0]:obstacle[1] + 1, obstacle[2]:obstacle[3] + 1] = 1
 
     return grid, int(north_min), int(east_min)
 
-
 # Assume all actions cost the same.
+
+
 class Action(Enum):
     """
     An action is represented by a 3 element tuple.
-
     The first 2 values are the delta of the action relative
     to the current grid position. The third and final value
     is the cost of performing the action.
@@ -57,6 +56,10 @@ class Action(Enum):
     EAST = (0, 1, 1)
     NORTH = (-1, 0, 1)
     SOUTH = (1, 0, 1)
+    NW = (-1, -1, np.sqrt(2))
+    NE = (-1, 1, np.sqrt(2))
+    SW = (1, -1, np.sqrt(2))
+    SE = (1, 1, np.sqrt(2))
 
     @property
     def cost(self):
@@ -87,11 +90,21 @@ def valid_actions(grid, current_node):
     if y + 1 > m or grid[x, y + 1] == 1:
         valid_actions.remove(Action.EAST)
 
+    # new actions to go diaganolly
+    if x - 1 < 0 or y + 1 > m or grid[x - 1, y + 1] == 1:
+        valid_actions.remove(Action.NE)
+    if x + 1 > n or y + 1 > m or grid[x + 1, y + 1] == 1:
+        valid_actions.remove(Action.SE)
+    if x - 1 < 0 or y - 1 < 0 or grid[x - 1, y - 1] == 1:
+        valid_actions.remove(Action.NW)
+    if x + 1 > n or y - 1 < 0 or grid[x + 1, y - 1] == 1:
+        valid_actions.remove(Action.SW)
+
     return valid_actions
 
 
 def a_star(grid, h, start, goal):
-
+    print("Trying to get from", start, "to", goal)
     path = []
     path_cost = 0
     queue = PriorityQueue()
@@ -100,16 +113,15 @@ def a_star(grid, h, start, goal):
 
     branch = {}
     found = False
-    
+
     while not queue.empty():
         item = queue.get()
         current_node = item[1]
         if current_node == start:
             current_cost = 0.0
-        else:              
+        else:
             current_cost = branch[current_node][0]
-            
-        if current_node == goal:        
+        if current_node == goal:
             print('Found a path.')
             found = True
             break
@@ -120,12 +132,12 @@ def a_star(grid, h, start, goal):
                 next_node = (current_node[0] + da[0], current_node[1] + da[1])
                 branch_cost = current_cost + action.cost
                 queue_cost = branch_cost + h(next_node, goal)
-                
-                if next_node not in visited:                
-                    visited.add(next_node)               
+
+                if next_node not in visited:
+                    visited.add(next_node)
                     branch[next_node] = (branch_cost, current_node, action)
                     queue.put((queue_cost, next_node))
-             
+
     if found:
         # retrace steps
         n = goal
@@ -138,24 +150,23 @@ def a_star(grid, h, start, goal):
     else:
         print('**********************')
         print('Failed to find a path!')
-        print('**********************') 
+        print('**********************')
     return path[::-1], path_cost
 
 
-def heuristic(position, goal_position):
-    return np.linalg.norm(np.array(position) - np.array(goal_position))
-
-
 """
-https://github.com/encukou/bresenham/blob/master/bresenham.py
+https://github.com/encukou/bresenham
+
 Implementation of Bresenham's line drawing algorithm
+
 See en.wikipedia.org/wiki/Bresenham's_line_algorithm
 """
 
-
 def bresenham(x0, y0, x1, y1):
     """Yield integer coordinates on the line from (x0, y0) to (x1, y1).
+
     Input coordinates should be integers.
+
     The result will contain both the start and the end point.
     """
     dx = x1 - x0
@@ -183,8 +194,39 @@ def bresenham(x0, y0, x1, y1):
             D -= 2*dx
         D += 2*dy
 
-def judge_bresenham_path():
-    sub_path = list(bresenham(p1[1], p1[1], p2[1]))
+# global_to_local is from (lon, lat, up) to (NED)
+def generate_helix(n, offsets, start_pos):
+    """
+    local NED coordinates
+    :param n: number of circles
+    :param offsets: x, y
+    :param start_pos: x, y, z
+    :return:
+    """
+    # Generate the helix waypoints
+    # After offsets
+    # TODO: should starting point to endpoint
+    radius = 10
+    vdiff = 10
+    num_of_wps = 12 * n - (n - 1)
+    x = np.cos(np.linspace(0, 2*np.pi * n, num_of_wps)) * radius + int(-offsets[0]) + start_pos[0]
+    y = np.sin(np.linspace(0, 2*np.pi * n, num_of_wps)) * radius + int(-offsets[1]) + start_pos[1]
+    z = np.linspace(0, vdiff*n, num_of_wps) + start_pos[2]
+    x_list, y_list, z_list = x.tolist(), y.tolist(), z.tolist()
+    wayps = zip(x_list, y_list, z_list)
+    wayps = [[int(p[0]), int(p[1]), int(p[2]), 0] for p in wayps]
+
+    wayps_reverse = zip(x_list[::-1], y_list[::-1], z_list[::-1])
+    wayps_reverse = [[int(p[0]), int(p[1]), int(p[2] - vdiff/2), 0] for p in wayps_reverse]
+    return wayps + wayps_reverse
+
+
+def heuristic(position, goal_position):
+    return np.linalg.norm(np.array(position) - np.array(goal_position))
+
+
+def check_collision(p1, p2, grid):
+    sub_path = list(bresenham(p1[0], p1[1], p2[0], p2[1]))
     for p in sub_path:
         if (grid[p] == 1):
             return False
@@ -195,11 +237,10 @@ def bresenham_path(path, grid):
     kept = [path[0]]
     last_safe = path[0]
     last_added = path[0]
-
     for p in path:
-        if (p == last_added):
+        if (p == last_safe):
             continue
-        if (judge_bresenham_path(last_added, p, grid)):
+        if (check_collision(last_added, p, grid)):
             last_safe = p
         else:
             kept.append(last_safe)
@@ -207,35 +248,32 @@ def bresenham_path(path, grid):
 
     # include the destination
     kept.append(path[-1])
+
     return kept
 
 
 def find_closest_safe(point, altitude, safe_points, tree):
     point_2d = (point[0], point[1])
-    # Query with kd-tree for fast lookup of closest item
+    # query with kdtree for fast lookup of closest item
     idx = tree.query([point_2d], k=1, return_distance=False)[0]
     safe_point = safe_points[idx[0]]
     print("Found {0} which was {1}".format(idx, safe_point))
     return (int(safe_point[0]), int(safe_point[1]))
 
 
-def add_altitude(vec, altitude):
-    return (vec[0], vec[1], vec[2] + altitude)
-
-
-# TODO: Make the vector math method
-def takeoff_and_landing(start_point, end_point, altitude, grid):
+def plan_takeoff_and_landing(start_point, end_point, altitude, grid):
     safe_points = np.transpose(np.nonzero(grid == 0))
     tree = KDTree(safe_points)
 
-    close_to_start = find_closest_safe(start_point, end_point, altitude, grid)
-    close_to_end = find_closest_safe(end_point, altitude. safe_points, tree)
+    close_to_start = find_closest_safe(start_point, altitude, safe_points, tree)
+    close_to_end = find_closest_safe(end_point, altitude, safe_points, tree)
     close_to_start_2d = (close_to_start[0], close_to_start[1])
+    # print("close to start", start_point, close_to_start, grid[close_to_start_2d])
     close_to_end_2d = (close_to_end[0], close_to_end[1])
+    # print("close to end", end_point, close_to_end, grid[close_to_end_2d])
     starting_points = [(start_point[0], start_point[1], start_point[2] + altitude, 0),
                        (close_to_start[0], close_to_start[1], start_point[2] + altitude)]
     ending_points = [(close_to_end[0], close_to_end[1], end_point[2] + altitude),
                      (end_point[0], end_point[1], end_point[2] + altitude),
                      (end_point[0], end_point[1], end_point[2])]
     return starting_points, ending_points, close_to_start_2d, close_to_end_2d
-
