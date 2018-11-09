@@ -2,6 +2,8 @@ from enum import Enum
 from queue import PriorityQueue
 import numpy as np
 
+from sklearn.neighbors import KDTree
+
 
 def create_grid(data, drone_altitude, safety_distance):
     """
@@ -140,7 +142,100 @@ def a_star(grid, h, start, goal):
     return path[::-1], path_cost
 
 
-
 def heuristic(position, goal_position):
     return np.linalg.norm(np.array(position) - np.array(goal_position))
+
+
+"""
+https://github.com/encukou/bresenham/blob/master/bresenham.py
+Implementation of Bresenham's line drawing algorithm
+See en.wikipedia.org/wiki/Bresenham's_line_algorithm
+"""
+
+
+def bresenham(x0, y0, x1, y1):
+    """Yield integer coordinates on the line from (x0, y0) to (x1, y1).
+    Input coordinates should be integers.
+    The result will contain both the start and the end point.
+    """
+    dx = x1 - x0
+    dy = y1 - y0
+
+    xsign = 1 if dx > 0 else -1
+    ysign = 1 if dy > 0 else -1
+
+    dx = abs(dx)
+    dy = abs(dy)
+
+    if dx > dy:
+        xx, xy, yx, yy = xsign, 0, 0, ysign
+    else:
+        dx, dy = dy, dx
+        xx, xy, yx, yy = 0, ysign, xsign, 0
+
+    D = 2*dy - dx
+    y = 0
+
+    for x in range(dx + 1):
+        yield x0 + x*xx + y*yx, y0 + x*xy + y*yy
+        if D >= 0:
+            y += 1
+            D -= 2*dx
+        D += 2*dy
+
+def judge_bresenham_path():
+    sub_path = list(bresenham(p1[1], p1[1], p2[1]))
+    for p in sub_path:
+        if (grid[p] == 1):
+            return False
+    return True
+
+
+def bresenham_path(path, grid):
+    kept = [path[0]]
+    last_safe = path[0]
+    last_added = path[0]
+
+    for p in path:
+        if (p == last_added):
+            continue
+        if (judge_bresenham_path(last_added, p, grid)):
+            last_safe = p
+        else:
+            kept.append(last_safe)
+            last_added = last_safe
+
+    # include the destination
+    kept.append(path[-1])
+    return kept
+
+
+def find_closest_safe(point, altitude, safe_points, tree):
+    point_2d = (point[0], point[1])
+    # Query with kd-tree for fast lookup of closest item
+    idx = tree.query([point_2d], k=1, return_distance=False)[0]
+    safe_point = safe_points[idx[0]]
+    print("Found {0} which was {1}".format(idx, safe_point))
+    return (int(safe_point[0]), int(safe_point[1]))
+
+
+def add_altitude(vec, altitude):
+    return (vec[0], vec[1], vec[2] + altitude)
+
+
+# TODO: Make the vector math method
+def takeoff_and_landing(start_point, end_point, altitude, grid):
+    safe_points = np.transpose(np.nonzero(grid == 0))
+    tree = KDTree(safe_points)
+
+    close_to_start = find_closest_safe(start_point, end_point, altitude, grid)
+    close_to_end = find_closest_safe(end_point, altitude. safe_points, tree)
+    close_to_start_2d = (close_to_start[0], close_to_start[1])
+    close_to_end_2d = (close_to_end[0], close_to_end[1])
+    starting_points = [(start_point[0], start_point[1], start_point[2] + altitude, 0),
+                       (close_to_start[0], close_to_start[1], start_point[2] + altitude)]
+    ending_points = [(close_to_end[0], close_to_end[1], end_point[2] + altitude),
+                     (end_point[0], end_point[1], end_point[2] + altitude),
+                     (end_point[0], end_point[1], end_point[2])]
+    return starting_points, ending_points, close_to_start_2d, close_to_end_2d
 
